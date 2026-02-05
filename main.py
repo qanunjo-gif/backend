@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 import sqlite3, os, time, json
 from collections import Counter
@@ -7,24 +7,13 @@ from collections import Counter
 # =========================
 # Storage (Render Free-safe)
 # =========================
-# على Render Free لا تستخدم /var/data (يحتاج Persistent Disk)
-# استخدم /tmp (قابل للكتابة) لكن البيانات قد تنحذف عند restart/deploy
 DB_DIR = os.getenv("DB_DIR", "/tmp")
 os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, "survey.db")
 
 # =========================
-# Admin password (ENV)
-# =========================
-# ضعها في Render -> Environment Variables:
-# ADMIN_PASSWORD = كلمة_قوية
-ADMIN_PASSWORD = os.getenv("qanun123456QANUN", "")
-
-# =========================
 # CORS
 # =========================
-# عند النشر: حدد دومين موقعك فقط عبر FRONTEND_ORIGIN
-# مثال: https://username.github.io
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "*")
 
 app = FastAPI(title="qanun survey api")
@@ -49,31 +38,37 @@ def get_conn():
     return conn
 
 # =========================
-# Root route (حتى ما يظهر Not Found على /)
+# Root route
 # =========================
 @app.get("/", response_class=HTMLResponse)
 def root():
     return """
-    <!doctype html>
-    <html lang="ar" dir="rtl">
-      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>qanun survey api</title>
-        <style>
-          body{font-family:system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif;margin:24px}
-          a{display:block;margin:8px 0}
-          code{background:#f5f5f5;padding:2px 6px;border-radius:6px}
-        </style>
-      </head>
-      <body>
-        <h2>qanun survey api</h2>
-        <p>روابط سريعة:</p>
-        <a href="/health">/health</a>
-        <a href="/docs">/docs</a>
-        <a href="/admin">/admin</a>
-        <p>إذا كنت تشغّل Frontend خارجي، تأكد أن <code>FRONTEND_ORIGIN</code> مضبوط.</p>
-      </body>
-    </html>
-    """
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>qanun survey api</title>
+    <style>
+      body{font-family:system-ui,-apple-system,"Segoe UI",Tahoma,Arial,sans-serif;margin:24px;line-height:1.8}
+      a{display:block;margin:8px 0}
+      code{background:#f5f5f5;padding:2px 6px;border-radius:6px}
+    </style>
+  </head>
+  <body>
+    <h2>qanun survey api ✅</h2>
+    <p>روابط سريعة:</p>
+    <a href="/health">/health</a>
+    <a href="/docs">/docs</a>
+    <a href="/admin">/admin</a>
+    <p>إذا كنت تشغّل Frontend خارجي، تأكد أن <code>FRONTEND_ORIGIN</code> مضبوط.</p>
+  </body>
+</html>
+"""
+
+@app.get("/favicon.ico")
+def favicon():
+    return Response(status_code=204)
 
 @app.get("/health")
 def health():
@@ -98,17 +93,11 @@ async def submit(request: Request):
 
     return {"status": "saved"}
 
-def _require_admin(body: dict):
-    if not ADMIN_PASSWORD:
-        raise HTTPException(status_code=500, detail="ADMIN_PASSWORD is not set on server")
-    if body.get("password") != ADMIN_PASSWORD:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
+# =========================
+# Admin APIs (بدون كلمة سر)
+# =========================
 @app.post("/admin/list")
-async def admin_list(request: Request):
-    body = await request.json()
-    _require_admin(body)
-
+async def admin_list():
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -121,16 +110,13 @@ async def admin_list(request: Request):
     for rid, ts, payload_str in rows:
         try:
             payload = json.loads(payload_str)
-        except:
+        except Exception:
             payload = {"raw": payload_str}
         out.append({"id": rid, "created_at": ts, "payload": payload})
     return {"rows": out}
 
 @app.post("/admin/summary")
-async def admin_summary(request: Request):
-    body = await request.json()
-    _require_admin(body)
-
+async def admin_summary():
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -152,7 +138,7 @@ async def admin_summary(request: Request):
     for (payload_str,) in payload_rows:
         try:
             p = json.loads(payload_str)
-        except:
+        except Exception:
             continue
 
         total += 1
@@ -180,6 +166,9 @@ async def admin_summary(request: Request):
     }
     return summary
 
+# =========================
+# Admin UI (بدون كلمة سر)
+# =========================
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page():
     return """
@@ -261,20 +250,13 @@ def admin_page():
     .kpi .value{font-size:26px;font-weight:900;margin-top:6px}
     .kpi .sub{font-size:12px;color:var(--muted);margin-top:4px}
 
-    .auth{
-      display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
-    }
-    input,button{
+    button{
+      margin-top:10px;
       padding: 11px 12px;
       border-radius: 14px;
-      border:1px solid rgba(17,17,17,.14);
-      font-size:14px;
-      outline:none;
-    }
-    button{
+      border:0;
       cursor:pointer;
       font-weight:900;
-      border:0;
       color:#1b1406;
       background: linear-gradient(90deg, #f3d27a, #d8aa3c, #c38a16);
       box-shadow: 0 12px 22px rgba(0,0,0,.12);
@@ -328,7 +310,7 @@ def admin_page():
         </div>
         <div>
           <h1>qanun — لوحة الإدارة</h1>
-          <p class="small">تعرض عدد الاستبيانات + أكثر الإجابات + آخر الردود</p>
+          <p class="small">بدون كلمة مرور (أي شخص يملك الرابط يستطيع رؤية البيانات)</p>
         </div>
       </div>
       <div class="small" id="statusText">غير متصل بعد</div>
@@ -336,12 +318,10 @@ def admin_page():
 
     <div class="grid">
       <div class="card">
-        <h2>تسجيل دخول الإدارة</h2>
-        <p class="muted">أدخل كلمة مرور ADMIN (الموجودة في Render env: ADMIN_PASSWORD) ثم اضغط “تحميل”.</p>
-        <div class="auth" style="margin-top:10px">
-          <input id="pw" type="password" placeholder="Admin password" />
-          <button id="loadBtn">تحميل</button>
-        </div>
+        <h2>لوحة الإحصائيات</h2>
+        <p class="muted">اضغط “تحميل” لقراءة الملخص والردود.</p>
+
+        <button id="loadBtn">تحميل</button>
         <div id="msg" class="msg err"></div>
 
         <div class="row" style="margin-top:12px">
@@ -461,11 +441,11 @@ def admin_page():
     });
   }
 
-  async function postJSON(path, body){
+  async function postJSON(path){
     const res = await fetch(API + path, {
       method:"POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify(body)
+      body: JSON.stringify({})
     });
     const data = await res.json().catch(()=> ({}));
     if(!res.ok) throw new Error(data.detail || "Request failed");
@@ -493,17 +473,14 @@ def admin_page():
   }
 
   document.getElementById("loadBtn").onclick = async () => {
-    const password = document.getElementById("pw").value;
-    if(!password) return showError("أدخل كلمة المرور.");
-
     try{
       clearMsg();
       statusText.textContent = "جاري التحميل...";
 
-      const summary = await postJSON("/admin/summary", {password});
+      const summary = await postJSON("/admin/summary");
       const total = summary.total || 0;
 
-      const list = await postJSON("/admin/list", {password});
+      const list = await postJSON("/admin/list");
       const rows = list.rows || [];
 
       kpiTotal.textContent = total;
@@ -550,4 +527,3 @@ def admin_page():
 </body>
 </html>
 """
-
