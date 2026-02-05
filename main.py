@@ -18,7 +18,7 @@ DB_PATH = os.path.join(DB_DIR, "survey.db")
 # =========================
 # ضعها في Render -> Environment Variables:
 # ADMIN_PASSWORD = كلمة_قوية
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+ADMIN_PASSWORD = os.getenv("qanun123456QANUN", "")
 
 # =========================
 # CORS
@@ -550,3 +550,4 @@ def admin_page():
 </body>
 </html>
 """
+
