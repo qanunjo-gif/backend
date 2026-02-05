@@ -4,17 +4,26 @@ from fastapi.middleware.cors import CORSMiddleware
 import sqlite3, os, time, json
 from collections import Counter
 
-BASE_DIR = os.path.dirname(__file__)
-DB_PATH = os.path.join(BASE_DIR, "survey.db")
+# ===== Paths (SQLite on Render Persistent Disk) =====
+# Render Persistent Disk mount path (recommended): /var/data
+DB_DIR = os.getenv("DB_DIR", "/var/data")
+os.makedirs(DB_DIR, exist_ok=True)
+DB_PATH = os.path.join(DB_DIR, "survey.db")
 
-# غيّرها فورًا
-ADMIN_PASSWORD = "ChangeMe_123!"
+# ===== Admin password from Environment Variables =====
+# Set in Render: ADMIN_PASSWORD=your_strong_password
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+
+# ===== CORS =====
+# In production, set FRONTEND_ORIGIN to your actual frontend domain
+# Example: https://username.github.io  or https://your-site.pages.dev
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "*")
 
 app = FastAPI(title="qanun survey api")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # عند النشر: حدد دومين موقعك فقط
+    allow_origins=[FRONTEND_ORIGIN] if FRONTEND_ORIGIN != "*" else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,6 +64,8 @@ async def submit(request: Request):
     return {"status": "saved"}
 
 def _require_admin(body: dict):
+    if not ADMIN_PASSWORD:
+        raise HTTPException(status_code=500, detail="ADMIN_PASSWORD is not set on server")
     if body.get("password") != ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -93,13 +104,13 @@ async def admin_summary(request: Request):
     finally:
         conn.close()
 
-    # حقول مفردة (radio/select)
+    # single-value fields (radio/select)
     single_fields = [
         "age", "app_rating", "will_use", "legal_status",
         "ai_use_work", "ai_sources_pref", "ai_trust", "ai_feature", "ai_disclaimer"
     ]
 
-    # حقول متعددة (checkbox arrays)
+    # multi-value fields (checkbox arrays)
     multi_fields = ["why_use", "signup", "payment"]
 
     counters = {f: Counter() for f in single_fields}
@@ -128,10 +139,7 @@ async def admin_summary(request: Request):
 
     def counter_to_labels_values(c: Counter):
         items = c.most_common()
-        return {
-            "labels": [k for k, _ in items],
-            "values": [v for _, v in items],
-        }
+        return {"labels": [k for k, _ in items], "values": [v for _, v in items]}
 
     summary = {
         "total": total,
@@ -142,7 +150,7 @@ async def admin_summary(request: Request):
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page():
-    # صفحة Admin منمّقة + رسوم بيانية Chart.js + جدول آخر الردود
+    # Admin page styled + Chart.js charts + latest responses table
     return """
 <!doctype html>
 <html lang="ar" dir="rtl">
@@ -299,7 +307,7 @@ def admin_page():
     <div class="grid">
       <div class="card">
         <h2>تسجيل دخول الإدارة</h2>
-        <p class="muted">أدخل كلمة مرور ADMIN (الموجودة في backend/main.py) ثم اضغط “تحميل”.</p>
+        <p class="muted">أدخل كلمة مرور ADMIN (الموجودة في Render env: ADMIN_PASSWORD) ثم اضغط “تحميل”.</p>
         <div class="auth" style="margin-top:10px">
           <input id="pw" type="password" placeholder="Admin password" />
           <button id="loadBtn">تحميل</button>
@@ -462,31 +470,25 @@ def admin_page():
       clearMsg();
       statusText.textContent = "جاري التحميل...";
 
-      // summary
       const summary = await postJSON("/admin/summary", {password});
       const total = summary.total || 0;
 
-      // list
       const list = await postJSON("/admin/list", {password});
       const rows = list.rows || [];
 
-      // KPIs
       kpiTotal.textContent = total;
       kpiUpdated.textContent = "آخر تحديث: " + new Date().toLocaleString();
 
-      // Top rating
       const r = summary.single.app_rating || {labels:[], values:[]};
       const [rt, rcount] = topOf(r.labels, r.values);
       kpiTopRating.textContent = rt;
       kpiTopRatingCount.textContent = "عدد: " + rcount;
 
-      // Top will_use
       const wu = summary.single.will_use || {labels:[], values:[]};
       const [wut, wuc] = topOf(wu.labels, wu.values);
       kpiWillUse.textContent = wut;
       kpiWillUseCount.textContent = "عدد: " + wuc;
 
-      // Charts
       destroyCharts();
 
       const age = summary.single.age || {labels:[], values:[]};
@@ -504,7 +506,6 @@ def admin_page():
       const ait = summary.single.ai_trust || {labels:[], values:[]};
       charts.push(makeBar("chartAiTrust", ait.labels, ait.values));
 
-      // Table
       renderTable(rows);
 
       statusText.textContent = "تم التحميل بنجاح";
@@ -516,12 +517,12 @@ def admin_page():
   };
 </script>
 
-<!-- مراجع وروابط (داخل كود كما هو مطلوب) -->
+<!-- References -->
 <!--
 FastAPI: https://fastapi.tiangolo.com/
-SQLite:  https://www.sqlite.org/
+Render Disks: https://render.com/docs/disks
+Render Env Vars: https://render.com/docs/configure-environment-variables
 Chart.js: https://www.chartjs.org/docs/latest/
-OWASP Session Management: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
 -->
 </body>
 </html>
